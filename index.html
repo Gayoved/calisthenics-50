@@ -129,6 +129,9 @@ details[open] summary{margin-bottom:8px}
 .chart text{fill:var(--muted);font-size:11px;font-family:var(--font-body)}
 .embed{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:#000}
 .embed iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20;display:flex;align-items:center;justify-content:center;padding:16px}
+.ovbox{background:var(--surface);color:var(--ink);border-radius:12px;padding:14px;width:100%;max-width:640px;display:flex;flex-direction:column;gap:10px}
+.ovbox button{min-height:40px;padding:6px 12px}
 .hidden{display:none !important}
 @media (prefers-reduced-motion: reduce){*{transition:none !important;animation:none !important}}
 </style>
@@ -356,21 +359,27 @@ const $ = sel => document.querySelector(sel);
 function h(html){ const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content; }
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 const CAN_EMBED = !(window.claude && typeof window.claude.use === "function");
-function embedBlock(id){
-  if (!CAN_EMBED) return "";
-  const [vid] = EX[id].v[0];
-  return `<button class="ghost" id="showvid" data-vid="${vid}">▶ הצג סרטון הדגמה כאן</button><div id="vidbox"></div>`;
+/* video links open in an in-app overlay where embedding is allowed (GitHub Pages) */
+function openVideo(vid, title){
+  closeVideo();
+  const ov = document.createElement("div");
+  ov.id = "vidov"; ov.className = "overlay"; ov.setAttribute("role","dialog"); ov.setAttribute("aria-modal","true"); ov.setAttribute("aria-label", title);
+  ov.innerHTML = `<div class="ovbox"><div class="row between"><b>${esc(title)}</b><button id="vidclose" aria-label="סגור">✕ סגור</button></div>
+    <div class="embed"><iframe src="https://www.youtube.com/embed/${vid}?rel=0&playsinline=1&autoplay=1" title="${esc(title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+    <p class="small muted">הסרטון לא מתנגן? <a href="${YT(vid)}" target="_blank" rel="noopener">פתח אותו ביוטיוב</a></p></div>`;
+  ov.addEventListener("click", e => { if (e.target === ov || e.target.id === "vidclose") closeVideo(); });
+  document.body.appendChild(ov);
+  document.getElementById("vidclose").focus();
 }
-function wireEmbed(){
-  const b = document.getElementById("showvid"); if (!b) return;
-  b.onclick = () => {
-    const box = document.getElementById("vidbox");
-    if (box.firstChild){ box.innerHTML = ""; b.textContent = "▶ הצג סרטון הדגמה כאן"; return; }
-    box.innerHTML = `<div class="embed"><iframe src="https://www.youtube-nocookie.com/embed/${b.dataset.vid}?rel=0&playsinline=1" title="סרטון הדגמה" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div><p class="small muted">אם הסרטון לא מתנגן כאן, השתמש בקישור ליוטיוב שמתחת.</p>`;
-    b.textContent = "הסתר את הסרטון";
-  };
-}
-function vids(id){ return EX[id].v.map(([vid, label]) => `<a class="vid" href="${YT(vid)}" target="_blank" rel="noopener">▶ ${esc(label)}</a>`).join(" · "); }
+function closeVideo(){ const o = document.getElementById("vidov"); if (o) o.remove(); }
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeVideo(); });
+document.addEventListener("click", e => {
+  const a = e.target.closest("a.vid[data-vid]");
+  if (!a || !CAN_EMBED) return;
+  e.preventDefault();
+  openVideo(a.dataset.vid, a.dataset.title);
+});
+function vids(id){ return EX[id].v.map(([vid, label]) => `<a class="vid" data-vid="${vid}" data-title="${esc(EX[id].name + " · " + label)}" href="${YT(vid)}" target="_blank" rel="noopener">▶ ${esc(label)}</a>`).join(" · "); }
 function mins(sec){ return Math.round(sec/60); }
 function fmtClock(sec){ sec = Math.max(0, Math.ceil(sec)); return Math.floor(sec/60) + ":" + String(sec%60).padStart(2,"0"); }
 function fmtDate(iso){ const d = new Date(iso); return d.getDate()+"."+(d.getMonth()+1)+"."+String(d.getFullYear()).slice(2); }
@@ -503,7 +512,6 @@ function renderPlayer(v){
       ${st.id!==st.orig ? `<p class="small muted">במקום "${esc(EX[st.orig].name)}"</p>` : ""}
       <div class="target">${esc(amtLabel(st.id, st.amt))}</div>
       <ul class="cues">${e.cues.map(c=>`<li>${esc(c)}</li>`).join("")}</ul>
-      ${embedBlock(st.id)}
       <div>${vids(st.id)}</div>`;
     if (e.type === "hold"){
       html += `<div class="clock" id="clock">${fmtClock(player.left!=null?player.left:st.amt)}</div>
@@ -515,7 +523,6 @@ function renderPlayer(v){
   }
   html += `</section><button class="ghost" id="quit">הפסק את האימון</button>`;
   v.append(h(html));
-  wireEmbed();
   const go = $("#go");
   if (st.kind === "warm"){
     go.onclick = () => { if (player.running) return nextStep(); beep(1); runTimer(st.sec, nextStep); render(); };
